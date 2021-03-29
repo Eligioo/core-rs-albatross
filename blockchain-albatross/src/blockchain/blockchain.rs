@@ -78,7 +78,6 @@ impl Blockchain {
     ) -> Result<Self, BlockchainError> {
         let chain_store = Arc::new(ChainStore::new(env.clone()));
         let history_store = Arc::new(HistoryStore::new(env.clone()));
-
         Ok(match chain_store.get_head(None) {
             Some(head_hash) => Blockchain::load(
                 env,
@@ -201,8 +200,14 @@ impl Blockchain {
             chain_store.get_block(&election_head.header.parent_election_hash, true, None);
 
         let last_slots = match prev_block {
-            Some(Block::Macro(prev_election_block)) => prev_election_block.get_validators(),
-            None => None,
+            Some(Block::Macro(prev_election_block)) => {
+                if prev_election_block.is_election_block() {
+                    prev_election_block.get_validators().unwrap()
+                } else {
+                    return Err(BlockchainError::InconsistentState);
+                }
+            }
+            None => Validators::default(),
             _ => return Err(BlockchainError::InconsistentState),
         };
 
@@ -224,9 +229,10 @@ impl Blockchain {
                 election_head,
                 election_head_hash,
                 current_slots: Some(current_slots),
-                previous_slots: last_slots,
+                previous_slots: Some(last_slots),
             }),
             push_lock: Mutex::new(()),
+
             #[cfg(feature = "metrics")]
             metrics: BlockchainMetrics::default(),
             genesis_supply,

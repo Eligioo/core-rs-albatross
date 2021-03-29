@@ -1,7 +1,6 @@
 use std::cmp;
 
 use ark_mnt6_753::G1Projective;
-use rayon::prelude::*;
 
 use nimiq_bls::{
     pedersen::{pedersen_generators, pedersen_hash},
@@ -43,40 +42,40 @@ pub fn merkle_tree_construct(inputs: Vec<Vec<bool>>) -> Vec<u8> {
     let generators = pedersen_generators(generators_needed);
 
     // Calculate the Pedersen hashes for the leaves.
-    let mut nodes: Vec<G1Projective> = inputs
-        .par_iter()
-        .map(|bits| pedersen_hash(bits.clone(), generators.clone()))
-        .collect();
+    let mut nodes = Vec::new();
 
-    // Process each level of nodes.
+    for input in inputs {
+        let hash = pedersen_hash(input, generators.clone());
+        nodes.push(hash);
+    }
+
+    // Calculate the rest of the tree
+    let mut next_nodes = Vec::new();
+
     while nodes.len() > 1 {
-        // Serialize all the child nodes.
-        let bits: Vec<bool> = nodes
-            .par_iter()
-            .map(|node| bytes_to_bits(&serialize_g1_mnt6(&node)))
-            .flatten()
-            .collect();
+        // Process each level of nodes.
+        for j in 0..nodes.len() / 2 {
+            let mut bytes = Vec::new();
 
-        // Chunk the bits into the number of parent nodes.
-        let mut chunks = Vec::new();
+            // Serialize the left node.
+            bytes.extend_from_slice(serialize_g1_mnt6(nodes[2 * j]).as_ref());
 
-        for i in 0..nodes.len() / 2 {
-            chunks.push(bits[2 * i..2 * i + 1].to_vec());
+            // Serialize the right node.
+            bytes.extend_from_slice(serialize_g1_mnt6(nodes[2 * j + 1]).as_ref());
+
+            // Calculate the parent node.
+            let bits = bytes_to_bits(&bytes);
+            let parent_node = pedersen_hash(bits, generators.clone());
+
+            next_nodes.push(parent_node);
         }
-
-        // Calculate the parent nodes.
-        let mut next_nodes: Vec<G1Projective> = chunks
-            .par_iter()
-            .map(|bits| pedersen_hash(bits.clone(), generators.clone()))
-            .collect();
-
-        // Clear the child nodes and add the parent nodes.
         nodes.clear();
+
         nodes.append(&mut next_nodes);
     }
 
     // Serialize the root node.
-    let bytes = serialize_g1_mnt6(&nodes[0]);
+    let bytes = serialize_g1_mnt6(nodes[0]);
 
     Vec::from(bytes.as_ref())
 }
@@ -136,9 +135,9 @@ pub fn merkle_tree_verify(
         // Serialize the left and right nodes.
         let mut bytes = Vec::new();
 
-        bytes.extend_from_slice(serialize_g1_mnt6(&left_node).as_ref());
+        bytes.extend_from_slice(serialize_g1_mnt6(left_node).as_ref());
 
-        bytes.extend_from_slice(serialize_g1_mnt6(&right_node).as_ref());
+        bytes.extend_from_slice(serialize_g1_mnt6(right_node).as_ref());
 
         let bits = bytes_to_bits(&bytes);
 
@@ -147,7 +146,7 @@ pub fn merkle_tree_verify(
     }
 
     // Serialize the root node.
-    let bytes = serialize_g1_mnt6(&result);
+    let bytes = serialize_g1_mnt6(result);
 
     let reference = Vec::from(bytes.as_ref());
 
@@ -227,10 +226,10 @@ pub fn merkle_tree_prove(inputs: Vec<Vec<bool>>, path: Vec<bool>) -> Vec<G1Proje
             }
 
             // Serialize the left node.
-            bytes.extend_from_slice(serialize_g1_mnt6(&nodes[2 * j]).as_ref());
+            bytes.extend_from_slice(serialize_g1_mnt6(nodes[2 * j]).as_ref());
 
             // Serialize the right node.
-            bytes.extend_from_slice(serialize_g1_mnt6(&nodes[2 * j + 1]).as_ref());
+            bytes.extend_from_slice(serialize_g1_mnt6(nodes[2 * j + 1]).as_ref());
 
             // Calculate the parent node.
             let bits = bytes_to_bits(&bytes);
